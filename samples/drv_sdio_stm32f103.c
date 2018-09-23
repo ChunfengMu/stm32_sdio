@@ -13,7 +13,13 @@
 #define SDIO_DMA_CHANNEL_BASE     (DMA2_Channel4)
 #define SDIO_CLOCK_FREQ           (72U * 1000 * 1000)
 
+#define SD_DETECT_PIN 67
+#define SD_INSERT GPIO_PIN_RESET 
+#define SD_REMOVE GPIO_PIN_SET
+
 static struct rt_mmcsd_host *sdio_host = RT_NULL;
+static struct rt_mailbox sd_detect_mb;
+static rt_uint32_t sd_detect_mb_pool[4];
 
 #ifdef SDIO_USE_DMA_INT
 void stm32_hw_dma_irq_process(DMA_Channel_TypeDef * Instance)
@@ -339,6 +345,87 @@ rt_uint32_t stm32_hw_sdio_clk_get(struct stm32_sdio *hw_sdio)
     return SDIO_CLOCK_FREQ;
 }
 
+void sd_detect_isr(void *args)
+{
+    rt_mb_send(&sd_detect_mb, 0);
+}
+
+static void sd_detect_thread_entry(void *param)
+{
+    int result, pin_status, sd_status = SD_REMOVE;
+    rt_err_t ret;
+
+    struct rt_mmcsd_host *host = param;
+    rt_uint32_t value;
+
+    ret = rt_mb_init(&sd_detect_mb, "sd_detect_mb", \
+        &sd_detect_mb_pool[0], sizeof(sd_detect_mb_pool) / sizeof(sd_detect_mb_pool[0]), \
+        RT_IPC_FLAG_FIFO);
+    RT_ASSERT(ret == RT_EOK);
+
+    /* PA8(67), pull up input */
+    rt_pin_mode(SD_DETECT_PIN, PIN_MODE_INPUT_PULLUP);
+
+    /* attach pin, set irq mode(MODE_RISING_FALLING), set callback */
+    rt_pin_attach_irq(SD_DETECT_PIN, PIN_IRQ_MODE_RISING_FALLING, sd_detect_isr, NULL);
+
+    /* enable irq */
+    rt_pin_irq_enable(SD_DETECT_PIN, PIN_IRQ_ENABLE);
+
+    while(1)
+    {
+        /* sd detect pin status change */
+        if((pin_status = rt_pin_read(SD_DETECT_PIN)) != sd_status)
+        {
+            mmcsd_change(host);
+
+            /* wait for change */
+            if(MMCSD_HOST_PLUGED == mmcsd_wait_cd_changed(RT_WAITING_FOREVER))
+            {
+                rt_kprintf("MMCSD_HOST_PLUGED! \n");
+
+#ifdef RT_USING_DFS_ELMFAT
+                if((result = dfs_mount("sd0", "/", "elm", 0, 0)) == 0)
+                {
+                    rt_kprintf("Mount filesystem success! \n");
+                }
+                else
+                {
+                    rt_kprintf("Mount filesystem failed:%d ! \n", result);
+                }
+#endif
+            }
+            else
+            {
+                rt_kprintf("MMCSD_HOST_UNPLUGED! \n");
+            }
+
+            /* update sd status */
+            sd_status = pin_status;
+        }
+
+        /* wait here until recv sd_detect_mb */
+        rt_mb_recv(&sd_detect_mb, (rt_uint32_t*)&value, RT_WAITING_FOREVER);
+
+        /* delay 500 ms */
+        rt_thread_delay(RT_TICK_PER_SECOND/2);
+    }
+}
+
+static rt_err_t sd_detect_thread_init(struct rt_mmcsd_host *host)
+{
+    rt_thread_t sd_detect_tid = RT_NULL;
+
+    sd_detect_tid = rt_thread_create("sd_detect", sd_detect_thread_entry, host, \
+        1024, RT_THREAD_PRIORITY_MAX-2, 10);
+    if (sd_detect_tid == RT_NULL)
+    {
+        return RT_ERROR;
+    }
+
+    return rt_thread_startup(sd_detect_tid);
+}
+
 rt_err_t rt_stm32_hw_sdio_init(void)
 {
     /* set io,clock and dma peripheral */
@@ -363,6 +450,11 @@ rt_err_t rt_stm32_hw_sdio_init(void)
             rt_kprintf("sdio_host_create error! \n");
             return RT_EIO;
         }
+    }
+
+    /* startup sd_detect thread */
+    {
+        sd_detect_thread_init(sdio_host);
     }
 
     return RT_EOK;
