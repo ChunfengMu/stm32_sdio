@@ -430,7 +430,7 @@ static void rthw_sdio_iocfg(struct rt_mmcsd_host *host, struct rt_mmcsd_io_cfg *
         clkcr |= HW_SDIO_BUSWIDE_1B;
     }
 
-    hw_sdio->clkcr = HW_SDIO_FLOW_ENABLE | clkcr;
+    hw_sdio->clkcr = /*HW_SDIO_FLOW_ENABLE | */clkcr;
 
     switch (io_cfg->power_mode)
     {
@@ -605,7 +605,7 @@ struct rt_mmcsd_host *sdio_host_create(struct stm32_sdio_des *sdio_des)
     rthw_sdio_irq_update(host, 1);
 
     // ready to change
-    mmcsd_change(host);
+    //mmcsd_change(host);
 
     return host;
 }

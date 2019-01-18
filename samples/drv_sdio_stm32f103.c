@@ -8,7 +8,7 @@
 
 /* config those macro for your board */
 
-//#define SDIO_USE_DMA_INT
+#define SDIO_USE_DMA_INT
 #define SDIO_DMA_CONTROLLER_BASE  (SDIO_BASE)
 #define SDIO_DMA_CHANNEL_BASE     (DMA2_Channel4)
 #define SDIO_CLOCK_FREQ           (72U * 1000 * 1000)
@@ -22,7 +22,7 @@ static struct rt_mailbox sd_detect_mb;
 static rt_uint32_t sd_detect_mb_pool[4];
 
 #ifdef SDIO_USE_DMA_INT
-void stm32_hw_dma_irq_process(DMA_Channel_TypeDef * Instance)
+static void stm32_hw_dma_irq_process(DMA_Channel_TypeDef * Instance)
 {
     uint32_t channel_index;
 
@@ -426,13 +426,13 @@ static rt_err_t sd_detect_thread_init(struct rt_mmcsd_host *host)
     return rt_thread_startup(sd_detect_tid);
 }
 
-rt_err_t rt_stm32_hw_sdio_init(void)
+int rt_stm32_hw_sdio_init(void)
 {
     /* set io,clock and dma peripheral */
     if(stm32_hw_sdio_init() != RT_EOK)
     {
         rt_kprintf("stm32_hw_sdio_init error! \n");
-        return RT_EIO;
+        return -1;
     }
 
     /* create sdio driver */
@@ -448,7 +448,7 @@ rt_err_t rt_stm32_hw_sdio_init(void)
         if(RT_NULL == sdio_host)
         {
             rt_kprintf("sdio_host_create error! \n");
-            return RT_EIO;
+            return -1;
         }
     }
 
@@ -457,6 +457,6 @@ rt_err_t rt_stm32_hw_sdio_init(void)
         sd_detect_thread_init(sdio_host);
     }
 
-    return RT_EOK;
+    return 0;
 }
 INIT_DEVICE_EXPORT(rt_stm32_hw_sdio_init);
